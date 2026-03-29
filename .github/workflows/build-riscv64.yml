@@ -12,7 +12,7 @@ on:
 
 jobs:
   build:
-    runs-on: [self-hosted, linux, riscv64]
+    runs-on: ubuntu-24.04-riscv
     timeout-minutes: 120
     steps:
       - name: Checkout
@@ -22,16 +22,15 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Set up Python
-        run: |
-          python3 -m venv /tmp/build-venv
-          . /tmp/build-venv/bin/activate
-          pip install --upgrade pip setuptools wheel cython
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
 
       - name: Build wheel
         run: |
+          uv venv /tmp/build-venv
           . /tmp/build-venv/bin/activate
-          pip wheel . --no-deps --wheel-dir /tmp/wheels/
+          uv pip install setuptools wheel cython
+          uv pip wheel . --no-deps --wheel-dir /tmp/wheels/
 
       - name: Verify platform tag
         run: |
@@ -58,7 +57,7 @@ jobs:
 
   release:
     needs: build
-    runs-on: [self-hosted, linux, riscv64]
+    runs-on: ubuntu-24.04-riscv
     if: success()
     env:
       GH_REPO: ${{ github.repository }}
@@ -99,26 +98,17 @@ jobs:
           gh release create "$TAG" \
             --title "$TITLE" \
             --notes "Prebuilt riscv64 wheel.
-          Built on: BananaPi F3 (SpacemiT K1, rv64imafdcv)
-          Python: $(python3 --version 2>&1)
-          Wheel: ${{ steps.wheel_info.outputs.whl_name }}" \
+
+          Built on: RISE riscv64 runner (ubuntu-24.04-riscv)
+          Wheel: ${{ steps.wheel_info.outputs.whl_name }}
+
+          Install:
+          \`\`\`
+          pip install httptools --extra-index-url https://gounthar.github.io/riscv64-python-wheels/simple/
+          \`\`\`" \
             /tmp/wheels/*.whl \
             /tmp/wheels/SHA256SUMS
 
       - name: Cleanup
         if: always()
         run: rm -rf /tmp/wheels
-
-  notify-index:
-    needs: release
-    runs-on: ubuntu-latest
-    if: success()
-    steps:
-      - name: Trigger index update
-        env:
-          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
-        run: |
-          gh api repos/gounthar/riscv64-python-wheels/dispatches \
-            -f event_type=fork-release-published \
-            -f "client_payload[repo]=${{ github.repository }}" \
-            -f "client_payload[tag]=${{ github.ref_name }}"
