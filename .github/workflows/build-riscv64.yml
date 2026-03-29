@@ -27,10 +27,7 @@ jobs:
 
       - name: Build wheel
         run: |
-          uv venv /tmp/build-venv
-          . /tmp/build-venv/bin/activate
-          uv pip install setuptools wheel cython
-          uv pip wheel . --no-deps --wheel-dir /tmp/wheels/
+          uvx --python 3.14 --with setuptools --with wheel --with cython pip wheel . --no-deps --wheel-dir /tmp/wheels/
 
       - name: Verify platform tag
         run: |
