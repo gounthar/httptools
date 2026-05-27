@@ -14,8 +14,39 @@ jobs:
   build:
     runs-on: ubuntu-24.04-riscv
     timeout-minutes: 120
+    permissions:
+      contents: write
     steps:
-      - name: Checkout
+      # Checkout the default branch first so we have git plus a pushable
+      # token, then import the requested upstream tag if the fork is missing
+      # it. The build can only check out a tag that exists on the fork, and
+      # upstream releases are not mirrored here automatically.
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Import upstream release tag
+        if: ${{ inputs.release_tag != '' }}
+        env:
+          TAG: ${{ inputs.release_tag }}
+          UPSTREAM: https://github.com/MagicStack/httptools.git
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin \
+              "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already on the fork; nothing to import."
+            exit 0
+          fi
+          echo "Importing annotated tag ${TAG} from upstream..."
+          git remote add upstream "${UPSTREAM}"
+          # Fetch the tag object itself (preserves the annotated, signed tag)
+          # and push it verbatim to the fork.
+          git fetch upstream tag "${TAG}"
+          git push origin "refs/tags/${TAG}"
+          echo "Imported ${TAG} into the fork."
+
+      - name: Checkout build ref
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.release_tag || github.ref }}
