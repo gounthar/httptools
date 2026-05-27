@@ -14,44 +14,49 @@ jobs:
   build:
     runs-on: ubuntu-24.04-riscv
     timeout-minutes: 120
+    # The build job only reads the repo, fetches an upstream tag and uploads
+    # an artifact. It never writes back. The release job below is the only
+    # writer and inherits the workflow-default token permissions.
     permissions:
-      contents: write
+      contents: read
     steps:
-      # Checkout the default branch first so we have git plus a pushable
-      # token, then import the requested upstream tag if the fork is missing
-      # it. The build can only check out a tag that exists on the fork, and
-      # upstream releases are not mirrored here automatically.
+      # Check out the fork (default branch) with submodules. When a specific
+      # upstream release tag is requested, fetch that tag from upstream and
+      # check it out in place. We deliberately do not push the upstream tag
+      # to the fork: the GITHUB_TOKEN is not allowed to write files under
+      # .github/workflows/, and upstream release tags carry their own
+      # workflow files, so the push is rejected. Building from the tag in
+      # the working tree avoids that entirely.
       - name: Checkout default branch
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
+          submodules: recursive
 
-      - name: Import upstream release tag
+      - name: Check out upstream release tag
         if: ${{ inputs.release_tag != '' }}
         env:
           TAG: ${{ inputs.release_tag }}
           UPSTREAM: https://github.com/MagicStack/httptools.git
         run: |
           set -euo pipefail
-          if git ls-remote --exit-code --tags origin \
-              "refs/tags/${TAG}" >/dev/null 2>&1; then
-            echo "Tag ${TAG} already on the fork; nothing to import."
-            exit 0
+          # Reject anything that is not a plain tag name (no leading '-', no
+          # whitespace or shell/git option characters) so the value can never
+          # be parsed as a git option such as --upload-pack=...
+          if ! printf '%s' "${TAG}" | grep -Eq '^[A-Za-z0-9._/-]+$' \
+              || printf '%s' "${TAG}" | grep -Eq '^-'; then
+            echo "Refusing suspicious release_tag: ${TAG}" >&2
+            exit 1
           fi
-          echo "Importing annotated tag ${TAG} from upstream..."
           git remote add upstream "${UPSTREAM}"
-          # Fetch the tag object itself (preserves the annotated, signed tag)
-          # and push it verbatim to the fork.
+          # '--' terminates option parsing; the tag can only be read as a ref.
           git fetch upstream tag "${TAG}"
-          git push origin "refs/tags/${TAG}"
-          echo "Imported ${TAG} into the fork."
-
-      - name: Checkout build ref
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.release_tag || github.ref }}
-          fetch-depth: 0
-          submodules: recursive
+          git checkout --detach "refs/tags/${TAG}" --
+          # Pick up any submodule URL changes the upstream tag introduced.
+          git submodule sync --recursive
+          git submodule update --init --recursive
+          echo "Building from upstream tag ${TAG}."
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
