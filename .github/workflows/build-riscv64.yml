@@ -17,41 +17,31 @@ jobs:
     permissions:
       contents: write
     steps:
-      # Checkout the default branch first so we have git plus a pushable
-      # token, then import the requested upstream tag if the fork is missing
-      # it. The build can only check out a tag that exists on the fork, and
-      # upstream releases are not mirrored here automatically.
+      # Check out the fork (default branch) with submodules. When a specific
+      # upstream release tag is requested, fetch that tag from upstream and
+      # check it out in place. We deliberately do not push the upstream tag
+      # to the fork: the GITHUB_TOKEN is not allowed to write files under
+      # .github/workflows/, and upstream release tags carry their own
+      # workflow files, so the push is rejected. Building from the tag in
+      # the working tree avoids that entirely.
       - name: Checkout default branch
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          submodules: recursive
 
-      - name: Import upstream release tag
+      - name: Check out upstream release tag
         if: ${{ inputs.release_tag != '' }}
         env:
           TAG: ${{ inputs.release_tag }}
           UPSTREAM: https://github.com/MagicStack/httptools.git
         run: |
           set -euo pipefail
-          if git ls-remote --exit-code --tags origin \
-              "refs/tags/${TAG}" >/dev/null 2>&1; then
-            echo "Tag ${TAG} already on the fork; nothing to import."
-            exit 0
-          fi
-          echo "Importing annotated tag ${TAG} from upstream..."
           git remote add upstream "${UPSTREAM}"
-          # Fetch the tag object itself (preserves the annotated, signed tag)
-          # and push it verbatim to the fork.
           git fetch upstream tag "${TAG}"
-          git push origin "refs/tags/${TAG}"
-          echo "Imported ${TAG} into the fork."
-
-      - name: Checkout build ref
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.release_tag || github.ref }}
-          fetch-depth: 0
-          submodules: recursive
+          git checkout "${TAG}"
+          git submodule update --init --recursive
+          echo "Building from upstream tag ${TAG}."
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
