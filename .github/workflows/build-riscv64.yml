@@ -14,8 +14,11 @@ jobs:
   build:
     runs-on: ubuntu-24.04-riscv
     timeout-minutes: 120
+    # The build job only reads the repo, fetches an upstream tag and uploads
+    # an artifact. It never writes back. The release job below is the only
+    # writer and inherits the workflow-default token permissions.
     permissions:
-      contents: write
+      contents: read
     steps:
       # Check out the fork (default branch) with submodules. When a specific
       # upstream release tag is requested, fetch that tag from upstream and
@@ -37,9 +40,18 @@ jobs:
           UPSTREAM: https://github.com/MagicStack/httptools.git
         run: |
           set -euo pipefail
+          # Reject anything that is not a plain tag name (no leading '-', no
+          # whitespace or shell/git option characters) so the value can never
+          # be parsed as a git option such as --upload-pack=...
+          if ! printf '%s' "${TAG}" | grep -Eq '^[A-Za-z0-9._/-]+$' \
+              || printf '%s' "${TAG}" | grep -Eq '^-'; then
+            echo "Refusing suspicious release_tag: ${TAG}" >&2
+            exit 1
+          fi
           git remote add upstream "${UPSTREAM}"
+          # '--' terminates option parsing; the tag can only be read as a ref.
           git fetch upstream tag "${TAG}"
-          git checkout "${TAG}"
+          git checkout --detach "refs/tags/${TAG}" --
           git submodule update --init --recursive
           echo "Building from upstream tag ${TAG}."
 
